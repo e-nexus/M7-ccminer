@@ -161,10 +161,10 @@
 #define PACKAGE_NAME "ccminer"
 
 /* Define to the home page for this package. */
-#define PACKAGE_URL "http://github.com/djm34/ccminer-msvc2015"
+#define PACKAGE_URL "https://github.com/breindrein/M7-ccminer-for-SM30-machines-and-above/"
 
 /* Define to the version of this package. */
-#define PACKAGE_VERSION "0.0.2-djm34"
+#define PACKAGE_VERSION "0.3.2-breindrein"
 
 /* If using the C implementation of alloca, define if you know the
    direction of stack growth for your system; otherwise it will be
