@@ -1,6 +1,6 @@
 /*
  * ripemd-160 djm34
- * 
+ *
  */
 
 /*
@@ -9,7 +9,7 @@
  * ==========================(LICENSE BEGIN)============================
  *
  * Copyright (c) 2014  djm34
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
  * "Software"), to deal in the Software without restriction, including
@@ -17,10 +17,10 @@
  * distribute, sublicense, and/or sell copies of the Software, and to
  * permit persons to whom the Software is furnished to do so, subject to
  * the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be
  * included in all copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
  * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
  * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
@@ -33,6 +33,10 @@
  *
  * @author   phm <phm@inbox.com>
  */
+#include <cuda.h>
+#include "cuda_runtime.h"
+#include "device_launch_parameters.h"
+
 
 #include <stdio.h>
 #include <stdint.h>
@@ -45,20 +49,21 @@
 #define SPH_C64(x)    ((uint64_t)(x ## ULL))
 #define SPH_C32(x)    ((uint32_t)(x ## U))
 #define SPH_T32(x)    ((x) & SPH_C32(0xFFFFFFFF))
-#define ROTL    ROTL32
+#define ROTL    SPH_ROTL32
 
 // aus heavy.cu
 extern cudaError_t MyStreamSynchronize(cudaStream_t stream, int situation, int thr_id);
 
 
- __constant__ uint32_t c_PaddedMessage80[32]; // padded message (80 bytes + padding)
-static __constant__ uint32_t gpu_IV[5];
+ __constant__ uint32_t c_PaddedMessage80[16]; // padded message (80 bytes + padding)
+//static __constant__ uint32_t gpu_IV[5];
 static __constant__ uint32_t bufo[5];
 static const uint32_t IV[5] = {
 	SPH_C32(0x67452301), SPH_C32(0xEFCDAB89), SPH_C32(0x98BADCFE),
 	SPH_C32(0x10325476), SPH_C32(0xC3D2E1F0)
 };
 
+// Aus ccminer-msvc2015-0.3.0 von djm34 kopiert
 __forceinline__ __device__ uint64_t xornot64(uint64_t a, uint64_t b, uint64_t c)
 {
 	uint64_t result;
@@ -72,6 +77,21 @@ __forceinline__ __device__ uint64_t xornot64(uint64_t a, uint64_t b, uint64_t c)
 	return result;
 
 }
+
+__forceinline__ __device__ uint64_t xornt64(uint64_t a, uint64_t b, uint64_t c)
+{
+uint64_t result;
+asm("{\n\t"
+	".reg .u64 m,n;\n\t"
+	"not.b64 m,%3; \n\t"
+	"or.b64 n, %2,m;\n\t"
+	"xor.b64 %0, %1,n;\n\t"
+	"}\n\t"
+	: "=l"(result) : "l"(a), "l"(b), "l"(c));
+return result;
+
+}
+// Ende Kopie
 
 /*
  * Round functions for RIPEMD-128 and RIPEMD-160.
@@ -100,7 +120,7 @@ __forceinline__ __device__ uint64_t xornot64(uint64_t a, uint64_t b, uint64_t c)
 #define RR(a, b, c, d, e, f, s, r, k)    { \
 		a = SPH_T32(ROTL(SPH_T32(a + f(b, c, d) + r + k), s) + e); \
 		c = ROTL(c, 10); \
-	} 
+	}
 
 #define ROUND1(a, b, c, d, e, f, s, r, k)  \
 	RR(a ## 1, b ## 1, c ## 1, d ## 1, e ## 1, f, s, r, K1 ## k)
@@ -297,8 +317,7 @@ __forceinline__ __device__ uint64_t xornot64(uint64_t a, uint64_t b, uint64_t c)
 		(h)[3] = SPH_T32((h)[4] + A1 + B2); \
 		(h)[4] = SPH_T32((h)[0] + B1 + C2); \
 		(h)[0] = tmp; \
-	} 
-
+	}
 
 
 __global__ void m7_ripemd160_gpu_hash_120(int threads, uint32_t startNounce, uint64_t *outputHash)
@@ -307,33 +326,45 @@ __global__ void m7_ripemd160_gpu_hash_120(int threads, uint32_t startNounce, uin
     int thread = (blockDim.x * blockIdx.x + threadIdx.x);
     if (thread < threads)
     {
-        
+
         uint32_t nounce = startNounce + thread ;
 union {
 uint8_t h1[64];
 uint32_t h4[16];
 uint64_t h8[8];
-} hash;  
+} hash;
 
-        uint32_t in2[16],in3[16];
-        uint32_t in[16],buf[5]; 
+#undef F1
+#undef F2
+#undef F3
+#undef F4
+#undef F5
+
+#define F1(x, y, z)   xor3(x,y,z)
+#define F2(x, y, z)   xandx(x,y,z)
+#define F3(x, y, z)   xornot64(x,y,z)
+#define F4(x, y, z)   xandx(z,x,y)
+#define F5(x, y, z)   xornt64(x,y,z)
+        uint32_t in2[16];
+        const uint32_t in3[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x3d0, 0};
+        uint32_t buf[5];
+
         #pragma unroll 16
-        for (int i=0;i<16;i++) {if ((i+16)<29)  {in2[i]= c_PaddedMessage80[i+16];} 
+        for (int i=0;i<16;i++) {if ((i+16)<29)  {in2[i]= c_PaddedMessage80[i];}
 						   else if ((i+16)==29) {in2[i]= nounce;}
-						   else if ((i+16)==30) {in2[i]= c_PaddedMessage80[i+16];}
+						   else if ((i+16)==30) {in2[i]= c_PaddedMessage80[i];}
 						   else                 {in2[i]= 0;}}
-		#pragma unroll 16
-		for (int i=0;i<16;i++) {in3[i]=0;}
-		                        in3[14]=0x3d0;
+
          #pragma unroll 5
 		 for (int i=0;i<5;i++) {buf[i]=bufo[i];}
-		 RIPEMD160_ROUND_BODY(in2, buf);		 
+
+		 RIPEMD160_ROUND_BODY(in2, buf);
          RIPEMD160_ROUND_BODY(in3, buf);
 
-  
-hash.h4[5]=0; 
+
+hash.h4[5]=0;
 #pragma unroll 5
-for (int i=0;i<5;i++) 
+for (int i=0;i<5;i++)
 {hash.h4[i]=buf[i];
 }
 
@@ -343,11 +374,12 @@ for (int i=0;i<3;i++) {outputHash[i*threads+thread]=hash.h8[i];}
  }
 }
 
-__host__ void m7_ripemd160_cpu_init(int thr_id, int threads)
+
+void m7_ripemd160_cpu_init(int thr_id, int threads)
 {
 
-    cudaMemcpyToSymbol(gpu_IV,IV,sizeof(IV),0, cudaMemcpyHostToDevice);
-	
+//    cudaMemcpyToSymbol(gpu_IV,IV,sizeof(IV),0, cudaMemcpyHostToDevice);
+
 }
 
 __host__ void m7_ripemd160_setBlock_120(void *pdata)
@@ -355,9 +387,9 @@ __host__ void m7_ripemd160_setBlock_120(void *pdata)
 	unsigned char PaddedMessage[128];
 	uint8_t ending =0x80;
 	memcpy(PaddedMessage, pdata, 122);
-	memset(PaddedMessage+122,ending,1); 
+	memset(PaddedMessage+122,ending,1);
 	memset(PaddedMessage+123, 0, 5); //useless
-	cudaMemcpyToSymbol( c_PaddedMessage80, PaddedMessage, 32*sizeof(uint32_t), 0, cudaMemcpyHostToDevice);
+	cudaMemcpyToSymbol( c_PaddedMessage80, PaddedMessage + 64, 16*sizeof(uint32_t), 0, cudaMemcpyHostToDevice);
 
 #undef F1
 #undef F2
@@ -368,16 +400,16 @@ __host__ void m7_ripemd160_setBlock_120(void *pdata)
 #define F2(x, y, z)   ((((y) ^ (z)) & (x)) ^ (z))
 #define F3(x, y, z)   (((x) | ~(y)) ^ (z))
 #define F4(x, y, z)   ((((x) ^ (y)) & (z)) ^ (y))
-#define F5(x, y, z)   ((x) ^ ((y) | ~(z)))	
+#define F5(x, y, z)   ((x) ^ ((y) | ~(z)))
 	uint32_t* alt_data =(uint32_t*)pdata;
         uint32_t in[16],buf[5];
 
-	    
+
 		for (int i=0;i<16;i++) {in[i]= alt_data[i];}
-        
-		
+
+
 		for (int i=0;i<5;i++) {buf[i]=IV[i];}
-		
+
 		 RIPEMD160_ROUND_BODY(in, buf); //no need to calculate it several time (need to moved)
 	cudaMemcpyToSymbol(bufo, buf, 5*sizeof(uint32_t), 0, cudaMemcpyHostToDevice);
 }

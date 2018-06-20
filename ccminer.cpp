@@ -42,7 +42,6 @@
 
 #include "miner.h"
 #include "algos.h"
-#include "sia/sia-rpc.h"
 #include <cuda_runtime.h>
 
 #ifdef WIN32
@@ -215,52 +214,9 @@ static char const usage[] = "\
 Usage: " PROGRAM_NAME " [OPTIONS]\n\
 Options:\n\
   -a, --algo=ALGO       specify the hash algorithm to use\n\
-			blake       Blake 256 (SFR)\n\
-			blake2s     Blake2-S 256 (NEVA)\n\
-			blakecoin   Fast Blake 256 (8 rounds)\n\
-			bmw         BMW 256\n\
-			c11/flax    X11 variant\n\
-			decred      Decred Blake256\n\
-			deep        Deepcoin\n\
-			dmd-gr      Diamond-Groestl\n\
-			fresh       Freshcoin (shavite 80)\n\
-			fugue256    Fuguecoin\n\
 			groestl     Groestlcoin\n\
-			heavy       Heavycoin\n\
-			jackpot     Jackpot\n\
-			keccak      Keccak-256 (Maxcoin)\n\
-			lbry        LBRY Credits (Sha/Ripemd)\n\
-			luffa       Joincoin\n\
-			lyra2       CryptoCoin\n\
-			lyra2v2     VertCoin\n\
-			lyra2Z      ZCoin\n\
-			lyra2h      HPP coin\n\
 			m7          m7 (crytonite) hash\n\
-			mjollnir    Mjollnircoin\n\
-			myr-gr      Myriad-Groestl\n\
 			neoscrypt   FeatherCoin, Phoenix, UFO...\n\
-			nist5       NIST5 (TalkCoin)\n\
-			penta       Pentablake hash (5x Blake 512)\n\
-			quark       Quark\n\
-			qubit       Qubit\n\
-			sia         SIA (Blake2B)\n\
-			sib         Sibcoin (X11+Streebog)\n\
-			scrypt      Scrypt\n\
-			scrypt-jane Scrypt-jane Chacha\n\
-			skein       Skein SHA2 (Skeincoin)\n\
-			skein2      Double Skein (Woodcoin)\n\
-			s3          S3 (1Coin)\n\
-			vanilla     Blake256-8 (VNL)\n\
-			veltor      Thorsriddle streebog\n\
-			whirlcoin   Old Whirlcoin (Whirlpool algo)\n\
-			whirlpool   Whirlpool algo\n\
-			x11evo      Permuted x11 (Revolver)\n\
-			x11         X11 (DarkCoin)\n\
-			x13         X13 (MaruCoin)\n\
-			x14         X14\n\
-			x15         X15\n\
-			x17         X17\n\
-			zr5         ZR5 (ZiftrCoin)\n\
   -d, --devices         Comma separated list of CUDA devices to use.\n\
                         Device IDs start counting from 0! Alternatively takes\n\
                         string names of your cards like gtx780ti or gt640#2\n\
@@ -950,20 +906,7 @@ static bool submit_upstream_work(CURL *curl, struct work *work)
 		if (opt_algo == ALGO_M7) {
 			data_size = 122; adata_sz = data_size/4;
 		}
-		else if (opt_algo == ALGO_ZR5) {
-			data_size = 80; adata_sz = 20;
-		}
-		else if (opt_algo == ALGO_DECRED) {
-			data_size = 192; adata_sz = 180/4;
-		}
-		else if (opt_algo == ALGO_SIA) {
-			return sia_submit(curl, pool, work);
-		}
-
-		if (opt_algo != ALGO_HEAVY && opt_algo != ALGO_MJOLLNIR) {
-			for (int i = 0; i < adata_sz; i++)
-				le32enc(work->data + i, work->data[i]);
-		}
+		
 		str = bin2hex((uchar*)work->data, data_size);
 		if (unlikely(!str)) {
 			applog(LOG_ERR, "submit_upstream_work OOM");
@@ -1134,18 +1077,6 @@ static bool get_upstream_work(CURL *curl, struct work *work)
 
 	gettimeofday(&tv_start, NULL);
 
-	if (opt_algo == ALGO_SIA) {
-		char *sia_header = sia_getheader(curl, pool);
-		if (sia_header) {
-			rc = sia_work_decode(sia_header, work);
-			free(sia_header);
-		}
-		gettimeofday(&tv_end, NULL);
-		if (have_stratum || unlikely(work->pooln != cur_pooln)) {
-			return rc;
-		}
-		return rc;
-	}
 
 	if (opt_debug_threads)
 		applog(LOG_DEBUG, "%s: want_longpoll=%d have_longpoll=%d",
@@ -1503,31 +1434,13 @@ static bool stratum_gen_work(struct stratum_ctx *sctx, struct work *work)
 
 	/* Generate merkle root */
 	switch (opt_algo) {
-		case ALGO_DECRED:
-		case ALGO_SIA:
-			// getwork over stratum, no merkle to generate
-			break;
-		case ALGO_HEAVY:
-		case ALGO_MJOLLNIR:
-			heavycoin_hash(merkle_root, sctx->job.coinbase, (int)sctx->job.coinbase_size);
-			break;
-		case ALGO_FUGUE256:
 		case ALGO_GROESTL:
-		case ALGO_KECCAK:
-		case ALGO_BLAKECOIN:
-		case ALGO_WHIRLCOIN:
-			SHA256((uchar*)sctx->job.coinbase, sctx->job.coinbase_size, (uchar*)merkle_root);
-			break;
-		case ALGO_WHIRLPOOL:
 		default:
 			sha256d(merkle_root, sctx->job.coinbase, (int)sctx->job.coinbase_size);
 	}
 
 	for (i = 0; i < sctx->job.merkle_count; i++) {
 		memcpy(merkle_root + 32, sctx->job.merkle[i], 32);
-		if (opt_algo == ALGO_HEAVY || opt_algo == ALGO_MJOLLNIR)
-			heavycoin_hash(merkle_root, merkle_root, 64);
-		else
 			sha256d(merkle_root, merkle_root, 64);
 	}
 	
@@ -2094,54 +2007,7 @@ static void *miner_thread(void *userdata)
 			case ALGO_M7:
 				max64 = 0x3ffffULL;
 				break;
-			case ALGO_BLAKECOIN:
-			case ALGO_BLAKE2S:
-			case ALGO_VANILLA:
-				minmax = 0x80000000U;
-				break;
-			case ALGO_BLAKE:
-			case ALGO_BMW:
-			case ALGO_DECRED:
-			//case ALGO_WHIRLPOOLX:
-				minmax = 0x40000000U;
-				break;
-			case ALGO_KECCAK:
-			case ALGO_LBRY:
-			case ALGO_LUFFA:
-			case ALGO_SIA:
-			case ALGO_SKEIN:
-			case ALGO_SKEIN2:
-				minmax = 0x1000000;
-				break;
-			case ALGO_C11:
-			case ALGO_DEEP:
-			case ALGO_HEAVY:
-			case ALGO_LYRA2v2:
-			case ALGO_LYRA2Z:
-			case ALGO_LYRA2H:
-			case ALGO_S3:
-			case ALGO_X11EVO:
-			case ALGO_X11:
-			case ALGO_X13:
-			case ALGO_WHIRLCOIN:
-			case ALGO_WHIRLPOOL:
-				minmax = 0x400000;
-				break;
-			case ALGO_JACKPOT:
-			case ALGO_X14:
-			case ALGO_X15:
-				minmax = 0x300000;
-				break;
-			case ALGO_LYRA2:
-
 			case ALGO_NEOSCRYPT:
-			case ALGO_SIB:
-			case ALGO_SCRYPT:
-			case ALGO_VELTOR:
-				minmax = 0x80000;
-				break;
-			case ALGO_SCRYPT_JANE:
-				minmax = 0x1000;
 				break;
 			}
 			max64 = max(minmax-1, max64);
@@ -2187,152 +2053,11 @@ static void *miner_thread(void *userdata)
 		/* scan nonces for a proof-of-work hash */
 		switch (opt_algo) {
 
-		case ALGO_BLAKECOIN:
-			rc = scanhash_blake256(thr_id, &work, max_nonce, &hashes_done, 8);
-			break;
-		case ALGO_BLAKE:
-			rc = scanhash_blake256(thr_id, &work, max_nonce, &hashes_done, 14);
-			break;
-		case ALGO_BLAKE2S:
-			rc = scanhash_blake2s(thr_id, &work, max_nonce, &hashes_done);
-			break;
-		case ALGO_BMW:
-			rc = scanhash_bmw(thr_id, &work, max_nonce, &hashes_done);
-			break;
-		case ALGO_C11:
-			rc = scanhash_c11(thr_id, &work, max_nonce, &hashes_done);
-			break;
-		case ALGO_DECRED:
-			//applog(LOG_BLUE, "version %x, nbits %x, ntime %x extra %x",
-			//	work.data[0], work.data[29], work.data[34], work.data[38]);
-			rc = scanhash_decred(thr_id, &work, max_nonce, &hashes_done);
-			break;
-		case ALGO_DEEP:
-			rc = scanhash_deep(thr_id, &work, max_nonce, &hashes_done);
-			break;
-		case ALGO_FRESH:
-			rc = scanhash_fresh(thr_id, &work, max_nonce, &hashes_done);
-			break;
-		case ALGO_FUGUE256:
-			rc = scanhash_fugue256(thr_id, &work, max_nonce, &hashes_done);
-			break;
-
 		case ALGO_GROESTL:
-		case ALGO_DMD_GR:
-			rc = scanhash_groestlcoin(thr_id, &work, max_nonce, &hashes_done);
-			break;
 
 		case ALGO_M7:
 			rc = scanhash_m7(thr_id, work.data, work.target, max_nonce, &hashes_done);
 			break;
-
-		case ALGO_MYR_GR:
-			rc = scanhash_myriad(thr_id, &work, max_nonce, &hashes_done);
-			break;
-
-		case ALGO_HEAVY:
-			rc = scanhash_heavy(thr_id, &work, max_nonce, &hashes_done, work.maxvote, HEAVYCOIN_BLKHDR_SZ);
-			break;
-		case ALGO_MJOLLNIR:
-			rc = scanhash_heavy(thr_id, &work, max_nonce, &hashes_done, 0, MNR_BLKHDR_SZ);
-			break;
-		case ALGO_KECCAK:
-			rc = scanhash_keccak256(thr_id, &work, max_nonce, &hashes_done);
-			break;
-		case ALGO_JACKPOT:
-			rc = scanhash_jackpot(thr_id, &work, max_nonce, &hashes_done);
-			break;
-		case ALGO_LBRY:
-			rc = scanhash_lbry(thr_id, &work, max_nonce, &hashes_done);
-			break;
-		case ALGO_LUFFA:
-			rc = scanhash_luffa(thr_id, &work, max_nonce, &hashes_done);
-			break;
-		case ALGO_QUARK:
-			rc = scanhash_quark(thr_id, &work, max_nonce, &hashes_done);
-			break;
-		case ALGO_QUBIT:
-			rc = scanhash_qubit(thr_id, &work, max_nonce, &hashes_done);
-			break;
-		case ALGO_LYRA2:
-			rc = scanhash_lyra2(thr_id, &work, max_nonce, &hashes_done);
-			break;
-		case ALGO_LYRA2Z:
-			rc = scanhash_lyra2Z(thr_id, &work, max_nonce, &hashes_done);
-			break;
-		case ALGO_LYRA2H:
-			rc = scanhash_lyra2h(thr_id, &work, max_nonce, &hashes_done);
-			break;
-		case ALGO_LYRA2v2:
-			rc = scanhash_lyra2v2(thr_id, &work, max_nonce, &hashes_done);
-			break;
-		case ALGO_NEOSCRYPT:
-			rc = scanhash_neoscrypt(thr_id, &work, max_nonce, &hashes_done);
-			break;
-		case ALGO_NIST5:
-			rc = scanhash_nist5(thr_id, &work, max_nonce, &hashes_done);
-			break;
-		case ALGO_PENTABLAKE:
-			rc = scanhash_pentablake(thr_id, &work, max_nonce, &hashes_done);
-			break;
-		case ALGO_SCRYPT:
-			rc = scanhash_scrypt(thr_id, &work, max_nonce, &hashes_done,
-				NULL, &tv_start, &tv_end);
-			break;
-		case ALGO_SCRYPT_JANE:
-			rc = scanhash_scrypt_jane(thr_id, &work, max_nonce, &hashes_done,
-				NULL, &tv_start, &tv_end);
-			break;
-		case ALGO_SKEIN:
-			rc = scanhash_skeincoin(thr_id, &work, max_nonce, &hashes_done);
-			break;
-		case ALGO_SKEIN2:
-			rc = scanhash_skein2(thr_id, &work, max_nonce, &hashes_done);
-			break;
-		case ALGO_SIA:
-			rc = scanhash_sia(thr_id, &work, max_nonce, &hashes_done);
-			break;
-		case ALGO_SIB:
-			rc = scanhash_sib(thr_id, &work, max_nonce, &hashes_done);
-			break;
-		case ALGO_S3:
-			rc = scanhash_s3(thr_id, &work, max_nonce, &hashes_done);
-			break;
-		case ALGO_VANILLA:
-			rc = scanhash_vanilla(thr_id, &work, max_nonce, &hashes_done, 8);
-			break;
-		case ALGO_VELTOR:
-			rc = scanhash_veltor(thr_id, &work, max_nonce, &hashes_done);
-			break;
-		case ALGO_WHIRLCOIN:
-		case ALGO_WHIRLPOOL:
-			rc = scanhash_whirl(thr_id, &work, max_nonce, &hashes_done);
-			break;
-		//case ALGO_WHIRLPOOLX:
-		//	rc = scanhash_whirlx(thr_id, &work, max_nonce, &hashes_done);
-		//	break;
-		case ALGO_X11EVO:
-			rc = scanhash_x11evo(thr_id, &work, max_nonce, &hashes_done);
-			break;
-		case ALGO_X11:
-			rc = scanhash_x11(thr_id, &work, max_nonce, &hashes_done);
-			break;
-		case ALGO_X13:
-			rc = scanhash_x13(thr_id, &work, max_nonce, &hashes_done);
-			break;
-		case ALGO_X14:
-			rc = scanhash_x14(thr_id, &work, max_nonce, &hashes_done);
-			break;
-		case ALGO_X15:
-			rc = scanhash_x15(thr_id, &work, max_nonce, &hashes_done);
-			break;
-		case ALGO_X17:
-			rc = scanhash_x17(thr_id, &work, max_nonce, &hashes_done);
-			break;
-		case ALGO_ZR5:
-			rc = scanhash_zr5(thr_id, &work, max_nonce, &hashes_done);
-			break;
-
 		default:
 			/* should never happen */
 			goto out;
@@ -2352,17 +2077,6 @@ static void *miner_thread(void *userdata)
 
 		// todo: update all algos to use work->nonces and pdata[19] as counter
 		switch (opt_algo) {
-			case ALGO_BLAKE2S:
-			case ALGO_DECRED:
-			case ALGO_LBRY:
-			case ALGO_SIA:
-			case ALGO_VELTOR:
-				// migrated algos
-				break;
-			case ALGO_ZR5:
-				// algos with only work.nonces[1] set
-				work.nonces[0] = nonceptr[0];
-				break;
 			default:
 				// algos with 2 results in pdata and work.nonces unset
 				work.nonces[0] = nonceptr[0];
@@ -2567,19 +2281,6 @@ longpoll_retry:
 		// exit on pool switch
 		if (switchn != pool_switch_count)
 			goto need_reinit;
-
-		if (opt_algo == ALGO_SIA) {
-			char *sia_header = sia_getheader(curl, pool);
-			if (sia_header) {
-				pthread_mutex_lock(&g_work_lock);
-				if (sia_work_decode(sia_header, &g_work)) {
-					g_work_time = time(NULL);
-				}
-				free(sia_header);
-				pthread_mutex_unlock(&g_work_lock);
-			}
-			continue;
-		}
 
 		val = json_rpc_longpoll(curl, lp_url, pool, rpc_req, &err);
 		if (have_stratum || switchn != pool_switch_count) {
@@ -3587,18 +3288,19 @@ int main(int argc, char *argv[])
 	long flags;
 	int i;
 
-	printf("*** ccminer " PACKAGE_VERSION " for nVidia GPUs by djm34 ***\n");
+	printf("*** ccminer " PACKAGE_VERSION " for nVidia GPUs \n");
+	printf("	by djm34 featuring breindrein ***\n");
 #ifdef _MSC_VER
 	printf("    Built with VC++ %d and nVidia CUDA SDK %d.%d\n\n", msver(),
 #else
 	printf("    Built with the nVidia CUDA Toolkit %d.%d\n\n",
 #endif
 		CUDART_VERSION/1000, (CUDART_VERSION % 1000)/10);
-	printf("  Originally based on Christian Buchner and Christian H. project based on tpruvot 1.8.4 release\n");
-	printf("  Include algos from alexis78, djm34, sp, tsiv and klausT.\n");
-	printf("  *** News (28/12/2017): lyra2h algo for HPP coin \n\n");
-	printf("BTC donation address: 1NENYmxwZGHsKFmyjTc5WferTn5VTFb7Ze (djm34)\n");
-	printf("ZCoin donation address: aChWVb8CpgajadpLmiwDZvZaKizQgHxfh5 (djm34)\n\n");
+	printf("  Originally based on Christian Buchner and Christian H. project based on djm34 0.3.0 release\n");
+	printf("  Include algos from alexis78, djm34, sp, tsiv, pallas and klausT.\n\n");
+	printf("  *** M7 speed-up compilation with original-code from pallas\n");
+	printf("  integrated by breindrein [M7, groestl and neoscrypt only!]\n\n");
+	printf("Cryptonite donation address: CenTGvLNuqLmMAsoTAahcfYrdEaVFXWAyD (breindrein)\n\n");
 
 	rpc_user = strdup("");
 	rpc_pass = strdup("");

@@ -1,6 +1,6 @@
 /*
  * tiger-192 djm34
- * 
+ *
  */
 
 /*
@@ -9,7 +9,7 @@
  * ==========================(LICENSE BEGIN)============================
  *
  * Copyright (c) 2014  djm34
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
  * "Software"), to deal in the Software without restriction, including
@@ -17,10 +17,10 @@
  * distribute, sublicense, and/or sell copies of the Software, and to
  * permit persons to whom the Software is furnished to do so, subject to
  * the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be
  * included in all copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
  * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
  * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
@@ -49,8 +49,8 @@
 
 // aus heavy.cu
 
+//extern int device_sm[8];
 
-//extern int compute_version[8];
 extern cudaError_t MyStreamSynchronize(cudaStream_t stream, int situation, int thr_id);
 
 static __forceinline__ __device__ void mul_unroll1_core_test(int threads, int thread, uint64_t* am, uint64_t* bm, uint64_t *w)
@@ -66,7 +66,7 @@ static __forceinline__ __device__ void mul_unroll1_core_test(int threads, int th
 #pragma unroll
 	for (int i = 0; i<35; i++) { w[i*threads + thread] = 0; }
 #if __CUDA_ARCH__ < 500
-#pragma unroll    
+#pragma unroll 2
 #endif
 	for (int i = 0; i<32; i++) {
 		uint32_t Q0;
@@ -164,7 +164,7 @@ static __forceinline__ __device__ void mul_unroll2_core_test(int threads, int th
 #pragma unroll
 	for (int i = 0; i<38; i++) { w[i*threads + thread] = 0; }
 #if __CUDA_ARCH__ < 500
-#pragma unroll    
+#pragma unroll 2
 #endif
 	for (int i = 0; i<35; i++) {
 		uint32_t Q0;
@@ -320,15 +320,15 @@ __host__ void m7_bigmul_unroll1_cpu(int thr_id, int threads, uint64_t* Hash1, ui
 {
 
 	int threadsperblock = 512;
-	if (device_sm[thr_id] >= 500) { threadsperblock = 256; }
+	if (device_sm[thr_id] >= 50) { threadsperblock = 256; }
 	dim3 grid((threads + threadsperblock - 1) / threadsperblock);
 	dim3 block(threadsperblock);
 
 	size_t shared_size = 0;
-	if (device_sm[thr_id]==500) {
+	if (device_sm[thr_id]==50) {
 		m7_bigmul_unroll1_gpu_50 << <grid, block, shared_size >> >(threads, Hash1, Hash2, finalHash);
 	}
-	else if (device_sm[thr_id]==520) {
+	else if (device_sm[thr_id]>=52) {
 		m7_bigmul_unroll1_gpu_80 << <grid, block, shared_size >> >(threads, Hash1, Hash2, finalHash);
 	}
 	else {
@@ -347,7 +347,7 @@ __host__ void m7_bigmul_unroll2_cpu(int thr_id, int threads, uint64_t* Hash1, ui
 
 	size_t shared_size = 0;
 
-	if (device_sm[thr_id] >= 500) {
+	if (device_sm[thr_id] >= 50) {
 		m7_bigmul_unroll2_gpu << <grid, block, shared_size >> >(threads, Hash1, Hash2, finalHash);
 	}
 	else {

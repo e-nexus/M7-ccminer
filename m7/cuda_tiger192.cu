@@ -1,6 +1,6 @@
 /*
  * tiger-192 djm34
- * 
+ *
  */
 
 /*
@@ -9,7 +9,7 @@
  * ==========================(LICENSE BEGIN)============================
  *
  * Copyright (c) 2014  djm34
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
  * "Software"), to deal in the Software without restriction, including
@@ -17,10 +17,10 @@
  * distribute, sublicense, and/or sell copies of the Software, and to
  * permit persons to whom the Software is furnished to do so, subject to
  * the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be
  * included in all copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
  * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
  * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
@@ -56,9 +56,9 @@
 extern cudaError_t MyStreamSynchronize(cudaStream_t stream, int situation, int thr_id);
 
 
- __constant__ uint64_t c_PaddedMessage80[16]; // padded message (80 bytes + padding)
- __constant__ uint64_t bufo[3];
-static __constant__ uint64_t gpu_III[3];
+__constant__ uint64_t c_PaddedMessage80[8]; // padded message (80 bytes + padding)
+__constant__ uint64_t bufo[3];
+//static __constant__ uint64_t gpu_III[3];
 static __constant__ uint64_t T1[256];
 static __constant__ uint64_t T2[256];
 static __constant__ uint64_t T3[256];
@@ -600,7 +600,7 @@ static const uint64_t cpu_T4[256] = {
 		ROUND(c, a, b, X5, mul); \
 		ROUND(a, b, c, X6, mul); \
 		ROUND(b, c, a, X7, mul); \
-	} 
+	}
 
 #define MUL5(x)   SPH_T64((x) * SPH_C64(5))
 #define MUL7(x)   SPH_T64((x) * SPH_C64(7))
@@ -628,7 +628,7 @@ static const uint64_t cpu_T4[256] = {
 		X5 ^= X4; \
 		X6 = SPH_T64(X6 + X5); \
 		X7 = SPH_T64(X7 - (X6 ^ SPH_C64(0x0123456789ABCDEF))); \
-	} 
+	}
 
 #define TIGER_ROUND_BODY(in, r)    { \
 		uint64_t A, B, C; \
@@ -655,13 +655,39 @@ static const uint64_t cpu_T4[256] = {
 		(r)[0] ^= A; \
 		(r)[1] = SPH_T64(B - (r)[1]); \
 		(r)[2] = SPH_T64(C + (r)[2]); \
-	} 
+	}
+
+#define TIGER_ROUND_BODY2(r)    { \
+		uint64_t A, B, C; \
+		uint64_t X0, X1, X2, X3, X4, X5, X6, X7; \
+ \
+		A = (r)[0]; \
+		B = (r)[1]; \
+		C = (r)[2]; \
+ \
+		X0 = 0; \
+		X1 = 0; \
+		X2 = 0; \
+		X3 = 0; \
+		X4 = 0; \
+		X5 = 0; \
+		X6 = 0; \
+		X7 = 0x3d0; \
+		PASS(A, B, C, MUL5); \
+		KSCHED; \
+		PASS(C, A, B, MUL7); \
+		KSCHED; \
+		PASS(B, C, A, MUL9); \
+ \
+		(r)[0] ^= A; \
+		(r)[1] = SPH_T64(B - (r)[1]); \
+		(r)[2] = SPH_T64(C + (r)[2]); \
+	}
 
 
 __global__ void m7_tiger192_gpu_hash_120(int threads, uint32_t startNounce, uint64_t *outputHash)
 {
-	
-	 __shared__ uint64_t sharedMem[1024];
+	__shared__ uint64_t sharedMem[1024];
 	if(threadIdx.x < 256)
 	{
 		sharedMem[threadIdx.x]      = T1[threadIdx.x];
@@ -670,97 +696,58 @@ __global__ void m7_tiger192_gpu_hash_120(int threads, uint32_t startNounce, uint
 		sharedMem[threadIdx.x+768]  = T4[threadIdx.x];
 	}
 	__syncthreads();
-    int thread = (blockDim.x * blockIdx.x + threadIdx.x);
-    if (thread < threads)
-    {
-        
-        uint32_t nounce = startNounce + thread;
-union {
-uint8_t h1[64];
-uint32_t h4[16];
-uint64_t h8[8];
-} hash;  
-/*
-#undef MUL5
-#undef MUL7
-#undef MUL9
-#define MUL5(x)   mul(x,5)
-#define MUL7(x)   mul(x,7)
-#define MUL9(x)   mul(x,9)
-*/
-#define PASS(a, b, c, mul)    { \
-		ROUND(a, b, c, X0, mul); \
-		ROUND(b, c, a, X1, mul); \
-		ROUND(c, a, b, X2, mul); \
-		ROUND(a, b, c, X3, mul); \
-		ROUND(b, c, a, X4, mul); \
-		ROUND(c, a, b, X5, mul); \
-		ROUND(a, b, c, X6, mul); \
-		ROUND(b, c, a, X7, mul); \
-	} 
+  int thread = (blockDim.x * blockIdx.x + threadIdx.x);
+  if (thread < threads) {
+  uint32_t nounce = startNounce + thread;
 
+	#define BYTE(x, n) __byte_perm(((uint32_t*)&(x))[(n) / 4], 0, 0x4440 + ((n) % 4))
 
-
-#define ROUND(a, b, c, x, mul)    { \
+	#define ROUND(a, b, c, x, mul)    { \
 		c ^= x; \
-		a = SPH_T64(a - (sharedMem[c & 0xFF] ^ sharedMem[((c >> 16) & 0xFF)+256] \
-			      ^ sharedMem[((c >> 32) & 0xFF)+512] ^ sharedMem[((c >> 48) & 0xFF)+768])); \
-		b = SPH_T64(b + (sharedMem[((c >> 8) & 0xFF)+768] ^ sharedMem[((c >> 24) & 0xFF)+512] \
-			^ sharedMem[((c >> 40) & 0xFF)+256] ^ sharedMem[(c >> 56) & 0xFF])); \
+		a = SPH_T64(a - (sharedMem[BYTE(c, 0)] ^ sharedMem[BYTE(c, 2)+256] \
+			      ^ sharedMem[BYTE(c, 4)+512] ^ sharedMem[BYTE(c, 6)+768])); \
+		b = SPH_T64(b + (sharedMem[BYTE(c, 1)+768] ^ sharedMem[BYTE(c, 3)+512] \
+			^ sharedMem[BYTE(c, 5)+256] ^ sharedMem[BYTE(c, 7)])); \
 		b = mul(b); \
-	} 
+	}
 
+	uint64_t buf[3], in2[8];
 
-        uint64_t in[8],buf[3];
-		uint64_t in2[8],in3[8];
+	#pragma unroll
+	for (int i = 0; i < 8; i++) in2[i] = c_PaddedMessage80[i];
+	uint32_t* Mess = (uint32_t*)in2;
+	Mess[13] = nounce;
+	Mess[15] = 0;
 
-        #pragma unroll 8
-		for (int i=0;i<8;i++) {in2[i]= c_PaddedMessage80[i+8];}
-		uint32_t* Mess = (uint32_t*)in2;
-		Mess[13]=nounce;
+	#pragma unroll
+	for (int i = 0; i < 3; i++) buf[i] = bufo[i];
 
-        #pragma unroll 7
-		for (int i=0;i<7;i++) {in3[i]=0;}
-		in3[7]=0x3d0;
+	TIGER_ROUND_BODY(in2, buf);
+	TIGER_ROUND_BODY2(buf);
 
-		#pragma unroll 3
-		for (int i=0;i<3;i++) {buf[i]=bufo[i];}
-
-         TIGER_ROUND_BODY(in2, buf);
-		 TIGER_ROUND_BODY(in3, buf);
-
-#pragma unroll 3
-for (int i=0;i<3;i++) {outputHash[i*threads+thread]=buf[i];} 
- } //// threads
+	#pragma unroll
+	for (int i = 0; i < 3; i++) outputHash[i * threads + thread] = buf[i];
+	}
 }
 
 
 void tiger192_cpu_init(int thr_id, int threads)
 {
-
-    cudaMemcpyToSymbol(gpu_III,III,sizeof(III),0, cudaMemcpyHostToDevice);
-
+//	cudaMemcpyToSymbol(gpu_III,III,sizeof(III),0, cudaMemcpyHostToDevice);
 	cudaMemcpyToSymbol(T1,cpu_T1,sizeof(cpu_T1),0, cudaMemcpyHostToDevice);
 	cudaMemcpyToSymbol(T2,cpu_T2,sizeof(cpu_T2),0, cudaMemcpyHostToDevice);
 	cudaMemcpyToSymbol(T3,cpu_T3,sizeof(cpu_T3),0, cudaMemcpyHostToDevice);
 	cudaMemcpyToSymbol(T4,cpu_T4,sizeof(cpu_T4),0, cudaMemcpyHostToDevice);
-	
-
-
 }
 
 __host__ void m7_tiger192_cpu_hash_120(int thr_id, int threads, uint32_t startNounce, uint64_t *d_outputHash, int order)
 {
+	const int threadsperblock = 256;
+//	const int threadsperblock = 640;
 
-	const int threadsperblock = 640; // Alignment mit mixtab Grösse. NICHT ÄNDERN
-//	const int threadsperblock = 256;
-
-dim3 grid(threads/threadsperblock);
-dim3 block(threadsperblock);
-//dim3 grid(1);
-//dim3 block(1);
-	size_t shared_size =0;
-	m7_tiger192_gpu_hash_120<<<grid, block, shared_size>>>(threads, startNounce, d_outputHash);
+	dim3 grid(threads/threadsperblock);
+	dim3 block(threadsperblock);
+	m7_tiger192_gpu_hash_120<<<grid, block>>>(threads, startNounce, d_outputHash);
 
 	MyStreamSynchronize(NULL, order, thr_id);
 }
@@ -771,9 +758,9 @@ __host__ void tiger192_setBlock_120(void *pdata)
 	unsigned char PaddedMessage[128];
 	uint8_t ending =0x01;
 	memcpy(PaddedMessage, pdata, 122);
-	memset(PaddedMessage+122,ending,1); 
-	memset(PaddedMessage+123, 0, 5); //useless
-	cudaMemcpyToSymbol( c_PaddedMessage80, PaddedMessage, 16*sizeof(uint64_t), 0, cudaMemcpyHostToDevice);
+	memset(PaddedMessage+122,ending,1);
+	//memset(PaddedMessage+123, 0, 5);
+	cudaMemcpyToSymbol( c_PaddedMessage80, PaddedMessage + 64, 8*sizeof(uint64_t), 0, cudaMemcpyHostToDevice);
 
 #undef ROUND
 #undef MUL5
@@ -792,14 +779,11 @@ __host__ void tiger192_setBlock_120(void *pdata)
 		b = mul(b); \
 	}
 
-
 	uint64_t* alt_data = (uint64_t*) pdata;
-	    uint64_t in[8],buf[3];
-		for (int i=0;i<8;i++) {in[i]= alt_data[i];}
-		for (int i=0;i<3;i++) {buf[i]=III[i];}
+	uint64_t in[8],buf[3];
+	for (int i=0;i<8;i++) in[i] = alt_data[i];
+	for (int i=0;i<3;i++) buf[i] = III[i];
+	TIGER_ROUND_BODY(in, buf);
 
-		 TIGER_ROUND_BODY(in, buf)   
-	cudaMemcpyToSymbol( bufo, buf, 3*sizeof(uint64_t), 0, cudaMemcpyHostToDevice);
-
-
+	cudaMemcpyToSymbol(bufo, buf, 3 * sizeof(uint64_t), 0, cudaMemcpyHostToDevice);
 }
