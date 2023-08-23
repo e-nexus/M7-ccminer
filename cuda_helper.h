@@ -64,10 +64,10 @@ extern const uint3 threadIdx;
 
 #if defined CUDART_VERSION
 #if CUDART_VERSION >= 9010
-#define SHFL(a, b) __shfl_sync(0xffffffff, (a), (b))
+#define SHFL(a, b, c) __shfl_sync(0xffffffff, (a), (b), (c))
 #define SHFL_UP(a, b, c) __shfl_up_sync(0xffffffff, (a), (b), (c))
 #else
-#define SHFL(a,b) __shfl((a), (b))
+#define SHFL(a,b,c) __shfl((a), (b), (c))
 #define SHFL_UP(a, b, c) __shfl_up((a), (b), (c))
 #endif
 #endif
