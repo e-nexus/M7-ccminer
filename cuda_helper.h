@@ -62,6 +62,16 @@ extern const uint3 threadIdx;
 // #define SPH_T64(x) ((x) & SPH_C64(0xFFFFFFFFFFFFFFFF))
 #endif
 
+#if defined CUDART_VERSION
+#if CUDART_VERSION >= 9010
+#define SHFL(a, b) __shfl_sync(0xffffffff, (a), (b))
+#define SHFL_UP(a, b, c) __shfl_up_sync(0xffffffff, (a), (b), (c))
+#else
+#define SHFL(a,b) __shfl((a), (b))
+#define SHFL_UP(a, b, c) __shfl_up((a), (b), (c))
+#endif
+#endif
+
 #if __CUDA_ARCH__ < 320
 // Host and Compute 3.0
 #define ROTL32(x, n) SPH_T32(((x) << (n)) | ((x) >> (32 - (n))))
