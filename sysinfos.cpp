@@ -10,8 +10,8 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include "miner.h"
+#include <cstdint>
+//#include "miner.h"
 
 #ifndef WIN32
 
@@ -41,7 +41,7 @@ static double linux_cputemp(int core)
 
 #define CPUFREQ_PATH \
  "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_cur_freq"
-static uint32_t linux_cpufreq(int core)
+static std::uint32_t linux_cpufreq(int core)
 {
 	FILE *fd = fopen(CPUFREQ_PATH, "r");
 	uint32_t freq = 0;
@@ -78,7 +78,7 @@ float cpu_temp(int core)
 #endif
 }
 
-uint32_t cpu_clock(int core)
+std::uint32_t cpu_clock(int core)
 {
 #ifdef WIN32
 	return 0;

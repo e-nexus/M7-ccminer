@@ -31,7 +31,6 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#include "miner.h"
 #include "nvml.h"
 #include "algos.h"
 
@@ -56,6 +55,7 @@
 # define CLOSESOCKET closesocket
 # define in_addr_t uint32_t
 #endif
+#include "miner.h"
 
 #define GROUP(g) (toupper(g))
 #define PRIVGROUP GROUP('W')

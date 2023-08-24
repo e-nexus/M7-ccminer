@@ -20,10 +20,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
-#include "miner.h"
 #include "nvml.h"
 #include "cuda_runtime.h"
+
+#include "miner.h"
 
 #ifdef USE_WRAPNVML
 

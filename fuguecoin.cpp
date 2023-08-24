@@ -1,11 +1,9 @@
 #include <string.h>
-#include <stdint.h>
 #include <cuda_runtime.h>
 
 #include "sph/sph_fugue.h"
 
 #include "miner.h"
-
 #include "cuda_fugue256.h"
 
 #define SWAP32(x) \

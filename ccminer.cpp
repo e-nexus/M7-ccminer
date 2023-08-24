@@ -40,7 +40,6 @@
 #endif
 #endif
 
-#include "miner.h"
 #include "algos.h"
 #include <cuda_runtime.h>
 
@@ -60,6 +59,8 @@ BOOL WINAPI ConsoleHandler(DWORD);
 #ifdef USE_WRAPNVML
 nvml_handle *hnvml = NULL;
 #endif
+
+#include "miner.h"
 
 enum workio_commands {
 	WC_GET_WORK,

@@ -21,7 +21,7 @@
 
 #include "serialize.hpp"
 
-using namespace std;
+// using namespace std;
 
 /** Errors thrown by the bignum class */
 class bignum_error : public std::runtime_error
