@@ -17,9 +17,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifdef WIN32
+#ifndef __cplusplus
+#define inline __inline
+#endif
+#endif
+
 #if defined(_MSC_VER)
 #include <inttypes.h>
+#ifndef __cplusplus
 #define inline __inline
+#endif
 #define ALIGN(x) __declspec(align(x))
 #else
 #define ALIGN(x) __attribute__((aligned(x)))
